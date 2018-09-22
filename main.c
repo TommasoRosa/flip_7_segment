@@ -43,9 +43,9 @@ void EEPROM_compare(unsigned int address, unsigned char data);
 
 //pwm pin is PB1
 
-const TOP_VAL = F_CPU/(PRESCALER*TARGET_FREQ) ;
-const MIN_COMP = TOP_VAL/10;
-const MAX_COMP = TOP_VAL/20;
+#define TOP_VAL  (F_CPU/(PRESCALER*TARGET_FREQ))
+#define MIN_COMP (TOP_VAL/10)
+#define MAX_COMP (TOP_VAL/20)
 void setup_timer1(){
  // Clear Timer/Counter Control Registers
 	TCCR1A = 0;
@@ -75,26 +75,11 @@ void setup_timer1(){
 }
 
 
-void write_time(){
-	uint8_t digit0, digit1, digit2, digit3;
-
-	digit0 = time.hours/10;
-	digit1 = time.hours % 10;
-	digit2 = time.minutes/10;
-	digit3 = time.minutes % 10;
-
-	display_digit(0, digit0);
-	display_digit(1, digit1);
-	display_digit(2, digit2);
-	display_digit(3, digit3);
-
-}
-
 #define SEGMENT_DELAY 300
 #define SET_SEGMENT(x) OCR1A=(x)?MAX_COMP:MIN_COMP
 
 //---------------------{  0 ,  1 ,  2 ,  3 ,  4 ,  5 ,  6 ,  7 ,  8 ,  9 ,  A ,  B ,  C ,  D ,  E ,  F , ' ',  - };
-const uint8_t SEG[16]= {0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71,0x00,0x40};
+const uint8_t SEG[]= {0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71,0x00,0x40};
 //reversed bits because i inverted them in the layout and can't be arsed to rewrite the correct 7-SEG symbols
 const uint8_t bit_reverse[7] = {0x00, 0x04, 0x02, 0x06, 0x01, 0x05, 0x03};
 
@@ -104,7 +89,7 @@ uint16_t display_digit(uint8_t digit_sel, uint8_t val){
 	uint16_t millis_count=0;
 	static uint8_t prev_mask[4];
 	
-	if (digit_sel > 4) return;
+	if (digit_sel > 4) return 0 ;
 	chip_mask |= (1 << (digit_sel + 4));
 
 	for (uint8_t i=0; i<7; i++){
@@ -124,6 +109,22 @@ uint16_t display_digit(uint8_t digit_sel, uint8_t val){
 	
 	prev_mask[digit_sel] = SEG[val];
 	return millis_count; //keep track of how much time has passed from when the function was called
+}
+
+
+void write_time(){
+	uint8_t digit0, digit1, digit2, digit3;
+
+	digit0 = time.hours/10;
+	digit1 = time.hours % 10;
+	digit2 = time.minutes/10;
+	digit3 = time.minutes % 10;
+
+	display_digit(0, digit0);
+	display_digit(1, digit1);
+	display_digit(2, digit2);
+	display_digit(3, digit3);
+
 }
 
 ////////////////////// M A I N ////////////////////////////////////////////////////////////////
@@ -162,7 +163,6 @@ int main(void) {
 		_tm.sec=time.seconds;
 		_tm.min=time.minutes;
 		_tm.hour=time.hours;
-		_tm.wday=time.days;
 		rtc_set_time(&_tm);
 		//enable the 1hz signal
 		rtc_SQW_set_freq(FREQ_1);
@@ -183,7 +183,10 @@ int main(void) {
 		}
 		*/
 
-		for (int i=0; i<10; i++) _delay_ms(2100 - display_digit(0, i) );
+		for (int i=0; i<10; i++)
+			for (int j=0; j<(2100-display_digit(0, i)); j++)
+				_delay_ms(1);
+		
 
 	}
 	return 0;
