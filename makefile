@@ -6,7 +6,7 @@
 ##########------------------------------------------------------##########
 
 MCU   = atmega328p
-F_CPU = 16000000UL  
+F_CPU = 8000000UL  
 BAUD  = 9600UL
 OPTIMISATION=2
 ## Also try BAUD = 19200 or 38400 if you're feeling lucky.
@@ -171,9 +171,9 @@ flash_109: flash
 ##########------------------------------------------------------##########
 
 ## Mega 48, 88, 168, 328 default values
-LFUSE = 0xFF
-HFUSE = 0xD9
-EFUSE = 0x05
+LFUSE = 0xE2
+HFUSE = 0xDE
+EFUSE = 0x07
 
 ## Generic 
 FUSE_STRING = -U lfuse:w:$(LFUSE):m -U hfuse:w:$(HFUSE):m -U efuse:w:$(EFUSE):m 

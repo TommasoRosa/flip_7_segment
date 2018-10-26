@@ -29,6 +29,7 @@ time_t time;
 #define CHIP_3_SEL 6
 #define CHIP_4_SEL 7
 #define INT1_PIN 3
+#define LED_PIN 0
 #define NO_SEGMENT_MASK 0x17
 
 
@@ -38,14 +39,30 @@ void restore_vars_from_EEPROM();
 void EEPROM_compare(unsigned int address, unsigned char data);
 
 
-#define TARGET_FREQ 50
+#define TARGET_FREQ 50 //Hz
 #define PRESCALER 64
+
+//cet the correct timer bits
+#if PRESCALER==1
+		#define TIMER_REG_SETUP (1 << CS10)
+	#elif PRESCALER==8
+		#define TIMER_REG_SETUP (1 << CS11)
+	#elif PRESCALER==64
+		#define TIMER_REG_SETUP (1 << CS11) | (1 << CS10)
+	#endif 
+
+#define TIMER_ON TCCR1B |= TIMER_REG_SETUP
+#define TIMER_OFF TCCR1B &= !TIMER_REG_SETUP
 
 //pwm pin is PB1
 
 #define TOP_VAL  (F_CPU/(PRESCALER*TARGET_FREQ))
 #define MIN_COMP (TOP_VAL/10)
 #define MAX_COMP (TOP_VAL/20)
+//might need finetuning
+#define SEG_ON (TOP_VAL/15)
+#define SEG_OFF (TOP_VAL/10)
+
 void setup_timer1(){
  // Clear Timer/Counter Control Registers
 	TCCR1A = 0;
@@ -64,14 +81,7 @@ void setup_timer1(){
 
 	OCR1A=MIN_COMP;
 
-	// Set prescaler and starts PWM 
-	#if PRESCALER==1
-		TCCR1B |= (1 << CS10);
-	#elif PRESCALER==8
-		TCCR1B |= (1 << CS11);
-	#elif PRESCALER==64
-		TCCR1B |= (1 << CS11) | (1 << CS10);
-	#endif 
+	TIMER_ON;
 }
 
 
@@ -88,6 +98,7 @@ uint16_t display_digit(uint8_t digit_sel, uint8_t val){
 	uint8_t val_mask = SEG[val];
 	uint16_t millis_count=0;
 	static uint8_t prev_mask[4];
+	//TIMER_ON;
 	
 	if (digit_sel > 4) return 0 ;
 	chip_mask |= (1 << (digit_sel + 4));
@@ -108,6 +119,8 @@ uint16_t display_digit(uint8_t digit_sel, uint8_t val){
 	}
 	
 	prev_mask[digit_sel] = SEG[val];
+
+	//TIMER_OFF;
 	return millis_count; //keep track of how much time has passed from when the function was called
 }
 
@@ -134,22 +147,26 @@ const char TIME__[] = __TIME__;
 uint8_t time_has_changed = 0;
 
 int main(void) {
-	uint8_t POWERUP_FLAGS = MCUSR; 
+	uint8_t POWERUP_FLAGS = MCUSR; //save the flags!!!
 	MCUSR = 0;
 
 	setup_timer1();
 
 	//setup ports;
 	DDRD = 0xf7; //0b11110111
+	DDRC = 0b00001111;
 	PORTD = NO_SEGMENT_MASK;
+
+	DDRD &= !(1<<INT1_PIN); 				// set PD3 as input
+	PORTD |= (1<<INT1_PIN); 				// set PD3 internal pull-up
+
+	DDRC |= (1<<LED_PIN); 				// set LED as output
 
 	//--- INT1 setup ---
 	EICRA = (1<<ISC10) | (1<<ISC11);	// set INT1 on a rising edge
 	EIMSK = (1<<INT1);					// enable INT1 
-	DDRD &= !(1<INT1_PIN); 				// set PD3 as input
-	PORTD |= (1<INT1_PIN); 				// set PD3 internal pull-up
 
-
+	_delay_ms(100);
 	//enable all interrupts
 	sei();
 
@@ -159,16 +176,18 @@ int main(void) {
 	time.minutes = atoi(&TIME__[3]);
 	time.hours = atoi(&TIME__[0]);
 	
-	if ((POWERUP_FLAGS>>EXTRF) & 0x01) {
+	//bool PowerUpFlag = (POWERUP_FLAGS>>EXTRF) & 0x01;
+	bool PowerUpFlag = false;
+	if (PowerUpFlag) {
 		_tm.sec=time.seconds;
 		_tm.min=time.minutes;
 		_tm.hour=time.hours;
 		rtc_set_time(&_tm);
 		//enable the 1hz signal
-		rtc_SQW_set_freq(FREQ_1);
-		rtc_SQW_enable(true);
 	}
 	else rtc_get_time();
+	rtc_SQW_set_freq(FREQ_1);
+	rtc_SQW_enable(true);
 
 	time.seconds = (int8_t) _tm.sec;
 	time.minutes = (int8_t) _tm.min;
@@ -183,26 +202,26 @@ int main(void) {
 		}
 		*/
 
-		for (int i=0; i<10; i++)
-			for (int j=0; j<(2100-display_digit(0, i)); j++)
-				_delay_ms(1);
-		
+		//flip clock counting demo
+		//for (int i=0; i<10; i++) for (int j=0; j<(2100-display_digit(0, i)); j++) _delay_ms(1);
 
 	}
 	return 0;
 }
 
 
-ISR(TIMER2_COMPA_vect){
+//ISR(TIMER2_COMPA_vect){
 
-}
+//}
 
-ISR(PCINT0_vect){ 
+//ISR(PCINT0_vect){ 
 
-}
+//}
 
 // 1 second interrupt - update the time
-ISR(PCINT1_vect){
+ISR(INT1_vect){
+	PINC |= _BV(LED_PIN);
+
 	time.seconds++;
 	if (time.seconds >= 60){
 		time.seconds = 0;

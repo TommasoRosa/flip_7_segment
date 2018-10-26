@@ -814,6 +814,10 @@ static bool s_is_ds3231 = false;
 
 void rtc_init(void)
 {
+  DDRC &= ~((1<<4) | (1<<5)); 		// set I2C pins as inputs
+  sbi(PORTC, 4);
+  sbi(PORTC, 5);
+  
 	// Attempt autodetection:
 	// 1) Read and save temperature register
 	// 2) Write a value to temperature register
@@ -827,7 +831,9 @@ void rtc_init(void)
 	rtc_write_byte(0xee, 0x11);
 	rtc_write_byte(0xdd, 0x12);
 
-	if (rtc_read_byte(0x11) == 0xee && rtc_read_byte(0x12) == 0xdd) {
+	uint8_t temp3 = rtc_read_byte(0x11);
+	uint8_t temp4 = rtc_read_byte(0x11);
+	if (temp3 == 0xee && temp4 == 0xdd) {
 		s_is_ds1307 = true;
 		// restore values
 		rtc_write_byte(temp1, 0x11);
@@ -1118,6 +1124,8 @@ void rtc_SQW_enable(bool enable)
 		// read control
    		twi_request_from(RTC_ADDR, 1);
 		uint8_t control = twi_receive();
+
+
 
 		if (enable) {
 			control |=  0b01000000; // set BBSQW to 1
