@@ -1,5 +1,5 @@
 
-#define F_CPU 16000000
+#define F_CPU 8000000
 
 #ifndef __AVR_ATmega328P__
 	#define __AVR_ATmega328P__
@@ -30,7 +30,8 @@ time_t time;
 #define CHIP_4_SEL 7
 #define INT1_PIN 3
 #define LED_PIN 0
-#define NO_SEGMENT_MASK 0x17
+#define PWM_PIN 1
+#define NO_SEGMENT_MASK 0x17 //0b00010111
 
 
 void EEPROM_write(unsigned int uiAddress, unsigned char ucData);
@@ -82,11 +83,15 @@ void setup_timer1(){
 	OCR1A=MIN_COMP;
 
 	TIMER_ON;
+
+	DDRB |= (1<<PWM_PIN);
+	
 }
 
 
-#define SEGMENT_DELAY 300
-#define SET_SEGMENT(x) OCR1A=(x)?MAX_COMP:MIN_COMP
+#define SEGMENT_DELAY 400
+#define NUM_STEPS 10	
+#define SET_SEGMENT(x) OCR1A=(x)?MIN_COMP:MAX_COMP
 
 //---------------------{  0 ,  1 ,  2 ,  3 ,  4 ,  5 ,  6 ,  7 ,  8 ,  9 ,  A ,  B ,  C ,  D ,  E ,  F , ' ',  - };
 const uint8_t SEG[]= {0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71,0x00,0x40};
@@ -97,22 +102,35 @@ uint16_t display_digit(uint8_t digit_sel, uint8_t val){
 	uint8_t chip_mask = 0;
 	uint8_t val_mask = SEG[val];
 	uint16_t millis_count=0;
-	static uint8_t prev_mask[4];
+	static uint8_t prev_mask[4]={0xff,0xff,0xff,0xff};
 	//TIMER_ON;
 	
-	if (digit_sel > 4) return 0 ;
+	if (digit_sel >= 4) return 0 ;
 	chip_mask |= (1 << (digit_sel + 4));
 
 	for (uint8_t i=0; i<7; i++){
 		//check if the segment needs changing from its previous value
-		if ((val_mask ^ prev_mask[digit_sel]) >> i){
-			//set the segment value
-			SET_SEGMENT( (val_mask>i) & 0x01 );
+		if (((val_mask ^ prev_mask[digit_sel]) >> i) & 0x01){
 			//select the segment
-			PORTD = chip_mask & bit_reverse[i] & !(1<<INT1_PIN);
+			PORTD = chip_mask | bit_reverse[i] | (1<<INT1_PIN);
+
+			//set the segment value
+			SET_SEGMENT( (val_mask >> i) & 0x01 );
 			_delay_ms(SEGMENT_DELAY);
+
+			/* Alternative which might reduce noise by stepping through intermediate positions slowly to reduce noise
+			for (uint8_t k=0; k<=NUM_STEPS; k++){
+				if ((val_mask >> i) & 0x01)
+					OCR1A = MIN_COMP + ((MAX_COMP-MIN_COMP)/NUM_STEPS)*k;
+				else
+					OCR1A = MAX_COMP - ((MAX_COMP-MIN_COMP)/NUM_STEPS)*k;
+				_delay_ms(SEGMENT_DELAY/NUM_STEPS);
+			}
+			*/
+			
 			millis_count+=SEGMENT_DELAY;
 
+			
 			//set to resting value to avoid glitches
 			PORTD = NO_SEGMENT_MASK;
 		}
@@ -140,11 +158,11 @@ void write_time(){
 
 }
 
-////////////////////// M A I N ////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////// M A I N ////////////////////////////////////////////////////////////////
 
 const char TIME__[] = __TIME__;
 //const char DATE__[] = __DATE__;
-uint8_t time_has_changed = 0;
+bool time_has_changed = 0;
 
 int main(void) {
 	uint8_t POWERUP_FLAGS = MCUSR; //save the flags!!!
@@ -153,11 +171,11 @@ int main(void) {
 	setup_timer1();
 
 	//setup ports;
-	DDRD = 0xf7; //0b11110111
+	DDRD = 0b11110111;
 	DDRC = 0b00001111;
 	PORTD = NO_SEGMENT_MASK;
 
-	DDRD &= !(1<<INT1_PIN); 				// set PD3 as input
+	//DDRD &= !(1<<INT1_PIN); 				// set PD3 as input
 	PORTD |= (1<<INT1_PIN); 				// set PD3 internal pull-up
 
 	DDRC |= (1<<LED_PIN); 				// set LED as output
@@ -166,26 +184,27 @@ int main(void) {
 	EICRA = (1<<ISC10) | (1<<ISC11);	// set INT1 on a rising edge
 	EIMSK = (1<<INT1);					// enable INT1 
 
+	//---switch off periphals that are not being used
+	 ADCSRA = 0; //ADC OFF
+
 	_delay_ms(100);
 	//enable all interrupts
 	sei();
 
 	rtc_init();
 
-	time.seconds = atoi(&TIME__[6]) + 4;
-	time.minutes = atoi(&TIME__[3]);
-	time.hours = atoi(&TIME__[0]);
-	
-	//bool PowerUpFlag = (POWERUP_FLAGS>>EXTRF) & 0x01;
-	bool PowerUpFlag = false;
-	if (PowerUpFlag) {
-		_tm.sec=time.seconds;
-		_tm.min=time.minutes;
-		_tm.hour=time.hours;
+	//TODO: understand how the fuck these powerup flags work!!!
+	if (false) 
+	if ((POWERUP_FLAGS>>EXTRF) & 0x01) 
+		{
+		_tm.sec=atoi(&TIME__[6]) + 4;
+		_tm.min=atoi(&TIME__[3]);
+		_tm.hour=atoi(&TIME__[0]);
 		rtc_set_time(&_tm);
 		//enable the 1hz signal
 	}
-	else rtc_get_time();
+	
+	rtc_get_time();
 	rtc_SQW_set_freq(FREQ_1);
 	rtc_SQW_enable(true);
 
@@ -193,40 +212,38 @@ int main(void) {
 	time.minutes = (int8_t) _tm.min;
 	time.hours = (int8_t) _tm.hour;
 
-
 	while (1) {
 		/*
 		if(time_has_changed) {
 			write_time();
-			time_has_changed=0;
+			time_has_changed=false;
 		}
 		*/
 
 		//flip clock counting demo
-		//for (int i=0; i<10; i++) for (int j=0; j<(2100-display_digit(0, i)); j++) _delay_ms(1);
+		for (int i=0; i<10; i++) for (int j=0; j<(1000-display_digit(0, i)); j++) _delay_ms(1);
+		//display_digit(0, 8);
+		//DDRD = 0b11110111;
+		//PORTD =0b11111000;
 
 	}
 	return 0;
 }
 
 
-//ISR(TIMER2_COMPA_vect){
 
-//}
-
-//ISR(PCINT0_vect){ 
-
-//}
+ISR(PCINT0_vect){ 
+}
 
 // 1 second interrupt - update the time
 ISR(INT1_vect){
-	PINC |= _BV(LED_PIN);
+	PINC |= _BV(LED_PIN); //toggle LED 
 
 	time.seconds++;
 	if (time.seconds >= 60){
 		time.seconds = 0;
 		time.minutes++;
-		time_has_changed = 1;
+		time_has_changed = true;
 		if (time.minutes>=60){
 			time.minutes=0;
 			time.hours++;
